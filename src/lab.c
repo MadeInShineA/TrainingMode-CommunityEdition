@@ -959,8 +959,8 @@ static int CheckOverlay(GOBJ *character, OverlayGroup overlay)
         case (OVERLAY_DASH): return state == ASID_DASH;
         case (OVERLAY_RUN): return state == ASID_RUN;
 
-        case (OVERLAY_JUMPS):
-            return data->jump.jumps_used != 0;
+        case (OVERLAY_JUMPS_USED):
+            return data->jump.jumps_used > 1;
 
         case (OVERLAY_FULLHOP):
         {
@@ -3413,7 +3413,10 @@ void Record_Think(GOBJ *rec_gobj)
             {
                 if (cpu_mode == RECMODE_CPU_OFF) {
                     int state = cpu_data->state_id;
-                    restore = event_data->cpu_countering || (ASID_DEADDOWN <= state && state <= ASID_DEADUPFALLHITCAMERAICE);
+                    restore = event_data->cpu_countering
+                        || (ASID_DEADDOWN <= state && state <= ASID_DEADUPFALLHITCAMERAICE)
+                        // Aitch: temporary hack to reset before we add Counter Action (Ledge) options.
+                        || state == ASID_CLIFFWAIT;
                 }
                 break;
             }
@@ -3894,37 +3897,21 @@ void Record_MemcardLoad(int slot, int file_no)
             {
                 Memcard_Wait();
 
-                // search for nth file with name TM_DEBUG
-                int tmrec_num = 0;
-                for (int i = 0; i < CARD_MAX_FILE; i++)
+                CARDStat card_stat;
+                if (CARDGetStatus(slot, file_no, &card_stat) == CARD_RESULT_READY)
                 {
-
-                    CARDStat card_stat;
-
-                    if (CARDGetStatus(slot, i, &card_stat) == CARD_RESULT_READY)
+                    // check company code
+                    if (strncmp(os_info->company, card_stat.company, sizeof(os_info->company)) == 0)
                     {
-                        // check company code
-                        if (strncmp(os_info->company, card_stat.company, sizeof(os_info->company)) == 0)
+                        // check game name
+                        if (strncmp(os_info->gameName, card_stat.gameName, sizeof(os_info->gameName)) == 0)
                         {
-                            // check game name
-                            if (strncmp(os_info->gameName, card_stat.gameName, sizeof(os_info->gameName)) == 0)
+                            // check file name
+                            if (strncmp("TMREC", card_stat.fileName, 5) == 0)
                             {
-                                // check file name
-                                if (strncmp("TMREC", card_stat.fileName, 5) == 0)
-                                {
-
-                                    // if the desired file
-                                    if (tmrec_num == file_no)
-                                    {
-                                        file_found = 1;
-                                        memcpy(&filename, card_stat.fileName, sizeof(filename)); // copy filename to load after this
-                                        file_size = card_stat.length;
-                                        break;
-                                    }
-
-                                    // increment tmrec num
-                                    tmrec_num++;
-                                }
+                                file_found = 1;
+                                memcpy(&filename, card_stat.fileName, sizeof(filename)); // copy filename to load after this
+                                file_size = card_stat.length;
                             }
                         }
                     }
@@ -5341,9 +5328,11 @@ static void UpdateOverlays(GOBJ *character, EventOption *overlays) {
             memset(&data->color[0], 0, sizeof(ColorOverlay));
 
             // Changes the alpha of the double jump overlay based on the number of jump used
-            if(j == OVERLAY_JUMPS){
-                float alpha_factor =  1 - (float) (data->attr.max_jumps - data->jump.jumps_used) / (float)data->attr.max_jumps;
-                ov.color.a = ov.color.a * alpha_factor;
+            if (j == OVERLAY_JUMPS_USED){
+                float max_jumps = (float)data->attr.max_jumps;
+                float jumps_used = (float)data->jump.jumps_used;
+                float alpha_factor = 1.0 - (max_jumps - jumps_used) / max_jumps;
+                ov.color.a *= alpha_factor;
             }
 
             *overlay_running = j;
@@ -5449,8 +5438,8 @@ void Event_Init(GOBJ *gobj)
 
     // determine controllers
     stc_hmn_controller = Fighter_GetControllerPort(hmn_data->ply);
-    stc_cpu_controller = 4;
-    stc_null_controller = 5;
+    stc_cpu_controller = (stc_hmn_controller+1) % 4;
+    stc_null_controller = (stc_cpu_controller+1) % 4;
 
     // set CPU AI to no_act 15
     cpu_data->cpu.ai = 0;
