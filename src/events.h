@@ -1,7 +1,7 @@
 #include "../MexTK/mex.h"
 
-#define TM_VERSSHORT "TM-CE v1.1 dev 1"
-#define TM_VERSLONG "TM Community Edition v1.1 dev 1"
+#define TM_VERSSHORT "TM-CE v1.1 dev 2"
+#define TM_VERSLONG "TM Community Edition v1.1 dev 2"
 #define TM_DEBUG 0 // 0 = release (no logging), 1 = OSReport logs, 2 = onscreen logs
 #define EVENT_DATASIZE 512
 #define TM_FUNC -(50 * 4)
@@ -352,6 +352,11 @@ typedef struct EventVars
     int *(*Tip_Display)(int lifetime, char *fmt, ...);
     void (*Tip_Destroy)();      // function pointer to destroy tip
     Savestate *savestate;       // points to the events main savestate
+
+    // To allow minor savestates during mirrored playback, 
+    // we need to record if the minor savestate was saved duting mirroring.
+    // Otherwise, the savestate will be loaded as mirrored AGAIN.
+    int savestate_saved_while_mirrored;
     evFunction evFunction;      // event specific functions
     HSD_Archive *event_archive; // event archive header
     DevText *db_console_text;

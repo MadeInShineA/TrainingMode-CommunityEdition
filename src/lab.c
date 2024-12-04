@@ -29,7 +29,8 @@ static u8 stc_null_controller;            // making this static so importing rec
 
 // Aitch: not really a better way to do this that I can think of.
 // Feel free to change if you find a way to implement playback takeover without a global.
-static int playback_cancelled = false;
+static int stc_playback_cancelled_hmn = false;
+static int stc_playback_cancelled_cpu = false;
 
 static u8 stc_tdi_val_num;                // number of custom tdi values set
 static s8 stc_tdi_vals[TDI_HITNUM][2][2]; // contains the custom tdi values
@@ -1981,11 +1982,12 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
     case (CPUSTATE_COUNTER):
     CPULOGIC_COUNTER:
     {
+        int actionable_this_frame = CPUAction_CheckASID(cpu, ASID_ACTIONABLE);
+
         // check if the CPU has been actionable yet
         if (eventData->cpu_isactionable == 0)
         {
-            if (!CPUAction_CheckASID(cpu, ASID_ACTIONABLE))
-                break;
+            if (!actionable_this_frame) break;
 
             eventData->cpu_isactionable = 1;                       // set actionable flag to begin running code
             eventData->cpu_groundstate = cpu_data->phys.air_state; // remember initial ground state
@@ -1995,8 +1997,14 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
         if ((eventData->cpu_groundstate == 1) && (cpu_data->phys.air_state == 0))
             eventData->cpu_groundstate = 0;
 
-        // increment frames since actionable
-        eventData->cpu_sincehit++;
+        // We need to reset the counter whenever the CPU is inactionable.
+        // Otherwise, if the cpu is actionable in the air before landing,
+        // then the sincehit value will increment even during tech options.
+        if (actionable_this_frame) {
+            eventData->cpu_sincehit++;
+        } else {
+            eventData->cpu_sincehit = 0;
+        }
 
         // ensure hit count and frame count criteria are met
         int action_id;
@@ -2973,7 +2981,30 @@ void CustomTDI_Destroy(GOBJ *gobj)
 void Inputs_Think(GOBJ *gobj)
 {
     Controller *controllers = gobj->userdata;
-    int hide_rest = false;
+    bool show[4] = {false};
+
+    if (Pause_CheckStatus(1) != 2) {
+        switch (LabOptions_General[OPTGEN_INPUT].option_val) {
+        case INPUTDISPLAY_OFF:
+            break;
+        case INPUTDISPLAY_HMN:
+            show[0] = true;
+            break;
+        case INPUTDISPLAY_CPU:
+            show[1] = true;
+            break;
+        case INPUTDISPLAY_HMN_AND_CPU:
+            show[0] = true;
+            show[1] = true;
+            break;
+        }
+    }
+
+    bool input_display = false;
+    for (int i = 0; i < 4; i++) input_display |= show[i];
+    if (!input_display) {
+        Match_ShowTimer();
+    }
 
     // update controllers
     for (int i = 0; i < 4; i++)
@@ -2982,6 +3013,18 @@ void Inputs_Think(GOBJ *gobj)
         JOBJ *controller_jobj = controller->jobj;
 
         if (controller_jobj == NULL) continue;
+        if (!show[i]) {
+            // Aitch: I would LOVE to set the hidden flag instead of abusing the Z axis.
+            // But for some reason it doesn't work! Lmk if you have a better idea.
+
+            controller_jobj->trans.Z = -99999.0;
+            //JOBJ_SetFlags(controller_jobj, JOBJ_HIDDEN);
+
+            JOBJ_SetMtxDirtySub(controller_jobj);
+            continue;
+        }
+
+        controller_jobj->trans.Z = 0.0;
 
         // get port and controller data
         GOBJ *fighter = Fighter_GetGObj(i);
@@ -3037,29 +3080,6 @@ void Inputs_Think(GOBJ *gobj)
         }
 
         JOBJ_SetMtxDirtySub(controller_jobj);
-
-        int input_option = LabOptions_General[OPTGEN_INPUT].option_val;
-        int paused = Pause_CheckStatus(1) == 2;
-
-        // Aitch: I would LOVE to set the hidden flag instead of abusing the Z axis.
-        // But for some reason, it doesn't work! Lmk if you have a better idea.
-        if (paused || input_option == 0) {
-            Match_ShowTimer();
-            controller_jobj->trans.Z = -99999.0;
-            //JOBJ_SetFlags(controller_jobj, JOBJ_HIDDEN);
-        } else if (hide_rest) {
-            controller_jobj->trans.Z = -99999.0;
-            //JOBJ_SetFlags(controller_jobj, JOBJ_HIDDEN);
-        } else if (input_option == 1) {
-            Match_HideTimer();
-            controller_jobj->trans.Z = 0.0;
-            //JOBJ_ClearFlags(controller_jobj, JOBJ_HIDDEN);
-            hide_rest = true;
-        } else {
-            Match_HideTimer();
-            controller_jobj->trans.Z = 0.0;
-            //JOBJ_ClearFlags(controller_jobj, JOBJ_HIDDEN);
-        }
     }
 }
 
@@ -3126,7 +3146,7 @@ GOBJ *Record_Init()
     // Create GOBJ
     GOBJ *rec_gobj = GObj_Create(0, 7, 0);
     // Add per frame process
-    GObj_AddProc(rec_gobj, Record_Think, 1);
+    GObj_AddProc(rec_gobj, Record_Think, 3);
 
     // create cobj
     GOBJ *cam_gobj = GObj_Create(19, 20, 0);
@@ -3198,11 +3218,12 @@ GOBJ *Record_Init()
     for (int i = 0; i < REC_SLOTS; i++)
     {
         rec_data.hmn_inputs[i] = calloc(sizeof(RecInputData));
-        rec_data.cpu_inputs[i] = calloc(sizeof(RecInputData));
-
-        // init frame this recording starts on
         rec_data.hmn_inputs[i]->start_frame = -1;
+        rec_data.hmn_inputs[i]->num = 0;
+
+        rec_data.cpu_inputs[i] = calloc(sizeof(RecInputData));
         rec_data.cpu_inputs[i]->start_frame = -1;
+        rec_data.cpu_inputs[i]->num = 0;
     }
 
     // init memcard stuff
@@ -3342,19 +3363,8 @@ void Record_Think(GOBJ *rec_gobj)
     GOBJ *cpu = Fighter_GetGObj(1);
     FighterData *cpu_data = cpu->userdata;
 
-    // get current hmn recording slot
-    int hmn_slot = LabOptions_Record[OPTREC_HMNSLOT].option_val;
-    if (hmn_slot == 0) // use random slot
-        hmn_slot = rec_data.hmn_rndm_slot;
-    else
-        hmn_slot--;
-
-    // get current cpu recording slot
-    int cpu_slot = LabOptions_Record[OPTREC_CPUSLOT].option_val;
-    if (cpu_slot == 0) // use random slot
-        cpu_slot = rec_data.cpu_rndm_slot;
-    else
-        cpu_slot--;
+    int hmn_slot = Record_GetSlot(0);
+    int cpu_slot = Record_GetSlot(1);
 
     RecInputData *hmn_inputs = rec_data.hmn_inputs[hmn_slot];
     RecInputData *cpu_inputs = rec_data.cpu_inputs[cpu_slot];
@@ -3382,8 +3392,9 @@ void Record_Think(GOBJ *rec_gobj)
 
     int loop_mode = LabOptions_Record[OPTREC_LOOP].option_val;
     int modes_allow_loop = hmn_mode != RECMODE_HMN_RECORD && cpu_mode != RECMODE_CPU_CONTROL && cpu_mode != RECMODE_CPU_RECORD;
-    int past_last_input = input_num != 0 && curr_frame+1 >= end_frame;
-    if (loop_mode & modes_allow_loop & past_last_input)
+    int has_inputs = input_num != 0;
+    int past_last_input = Record_PastLastInput(1);
+    if (loop_mode & modes_allow_loop & has_inputs & past_last_input)
     {
         event_vars->game_timer = rec_state->frame;
 
@@ -3406,7 +3417,7 @@ void Record_Think(GOBJ *rec_gobj)
                 break;
             case (AUTORESTORE_PLAYBACK_END):
             {
-                restore = past_last_input;
+                restore = past_last_input & has_inputs;
                 break;
             }
             case (AUTORESTORE_COUNTER):
@@ -3514,8 +3525,10 @@ void Record_Update(int ply, RecInputData *input_data, int rec_mode)
         }
         case (RECMODE_CPU_PLAYBACK):
         {
-            // ensure we haven't taken over playback
-            if (playback_cancelled && ply == 0)
+            // ensure we haven't taken over playback or set the cpu to counter
+            if (stc_playback_cancelled_hmn && ply == 0)
+                return;
+            if (stc_playback_cancelled_cpu && ply == 1)
                 return;
 
             // ensure we have an input for this frame
@@ -3567,19 +3580,48 @@ void Record_Update(int ply, RecInputData *input_data, int rec_mode)
 }
 void Record_InitState(GOBJ *menu_gobj)
 {
-    playback_cancelled = false;
+    stc_playback_cancelled_hmn = false;
+    stc_playback_cancelled_cpu = false;
     if (event_vars->Savestate_Save(rec_state))
         Record_OnSuccessfulSave(1);
 }
 void Record_ResaveState(GOBJ *menu_gobj)
 {
-    playback_cancelled = false;
+    stc_playback_cancelled_hmn = false;
+    stc_playback_cancelled_cpu = false;
     if (event_vars->Savestate_Save(rec_state))
         Record_OnSuccessfulSave(0);
+
+    // If we re-save during mirroring, then we NEED to show the new savestate as unmirrored.
+    // That's just how savestates work. So to use old, unmirrored inputs, we need to reverse them in place.
+    if (LabOptions_Record[OPTREC_MIRRORED_PLAYBACK].option_val) {
+        // need to disable mirroring, as the new savestate is inherently unmirrored.
+        LabOptions_Record[OPTREC_MIRRORED_PLAYBACK].option_val = 0;
+        LabOptions_Record[OPTREC_HMNMODE].disable = 0;
+        LabOptions_Record[OPTREC_CPUMODE].disable = 0;
+
+        for (int ply = 0; ply < 2; ++ply) {
+            for (int slot = 0; slot < REC_SLOTS; ++slot) {
+                RecInputData *input_data;
+                if (ply == 0)
+                    input_data = rec_data.hmn_inputs[slot];
+                else
+                    input_data = rec_data.cpu_inputs[slot];
+
+                int input_num = input_data->num;
+                for (int input = 0; input <= input_num; ++input) {
+                    RecInputs *inputs = &input_data->inputs[input];
+                    inputs->stickX *= -1;
+                    inputs->substickX *= -1;
+                }
+            }
+        }
+    }
 }
 void Record_DeleteState(GOBJ *menu_gobj)
 {
-    playback_cancelled = false;
+    stc_playback_cancelled_hmn = false;
+    stc_playback_cancelled_cpu = false;
     for (int i = 0; i < sizeof(LabOptions_Record) / sizeof(EventOption); i++)
     {
         if (i == OPTREC_SAVE_LOAD) {
@@ -3596,6 +3638,11 @@ void Record_DeleteState(GOBJ *menu_gobj)
         LabOptions_SlotChancesCPU[i].option_val = 0;
         LabOptions_SlotChancesHMN[i].disable = 1;
         LabOptions_SlotChancesCPU[i].disable = 1;
+
+        rec_data.hmn_inputs[i]->start_frame = -1;
+        rec_data.hmn_inputs[i]->num = 0;
+        rec_data.cpu_inputs[i]->start_frame = -1;
+        rec_data.cpu_inputs[i]->num = 0;
     }
 
     LabMenu_Record.scroll = 0;
@@ -3733,7 +3780,7 @@ void Record_ChangeCPUMode(GOBJ *menu_gobj, int value)
 }
 void Record_ChangeMirroredPlayback(GOBJ *menu_gobj, int value)
 {
-    // Cannot change HMN/CPU Mode while mirrored playback is on
+    // Cannot change HMN/CPU Mode while mirrored playback is on.
     if (value == 1)
     {
         LabOptions_Record[OPTREC_HMNMODE].disable = 1;
@@ -3773,27 +3820,47 @@ int Record_GetRandomSlot(RecInputData **input_data, EventOption slot_menu[])
 
     return 0;
 }
+int Record_GetSlot(int ply) {
+    int slot;
+    int random_slot;
+
+    if (ply == 0) {
+        slot = LabOptions_Record[OPTREC_HMNSLOT].option_val;
+        random_slot = rec_data.hmn_rndm_slot;
+    } else {
+        slot = LabOptions_Record[OPTREC_CPUSLOT].option_val;
+        random_slot = rec_data.cpu_rndm_slot;
+    }
+
+    if (slot == 0)
+        slot = random_slot;
+    else
+        slot--;
+
+    return slot;
+}
+int Record_PastLastInput(int ply)
+{
+    int slot = Record_GetSlot(ply);
+    int curr_frame = Record_GetCurrFrame();
+    RecInputData *inputs;
+    if (ply == 0)
+        inputs = rec_data.hmn_inputs[slot];
+    else
+        inputs = rec_data.cpu_inputs[slot];
+
+    return curr_frame > inputs->num;
+}
 int Record_GetCurrFrame()
 {
     return (event_vars->game_timer - 1) - rec_state->frame;
 }
 int Record_GetEndFrame()
 {
-    // get hmn slot
-    int hmn_slot = LabOptions_Record[OPTREC_HMNSLOT].option_val;
-    if (hmn_slot == 0) // use random slot
-        hmn_slot = rec_data.hmn_rndm_slot;
-    else
-        hmn_slot--;
-
-    // get cpu slot
-    int cpu_slot = LabOptions_Record[OPTREC_CPUSLOT].option_val;
-    if (cpu_slot == 0) // use random slot
-        cpu_slot = rec_data.cpu_rndm_slot;
-    else
-        cpu_slot--;
-
+    int hmn_slot = Record_GetSlot(0);
+    int cpu_slot = Record_GetSlot(1);
     int curr_frame = Record_GetCurrFrame();
+
     RecInputData *hmn_inputs = rec_data.hmn_inputs[hmn_slot];
     RecInputData *cpu_inputs = rec_data.cpu_inputs[cpu_slot];
 
@@ -3861,6 +3928,7 @@ void Record_OnSuccessfulSave(int deleteRecordings)
 
     // also save to personal savestate
     event_vars->Savestate_Save(event_vars->savestate);
+    event_vars->savestate_saved_while_mirrored = LabOptions_Record[OPTREC_MIRRORED_PLAYBACK].option_val;
 
     // take screenshot
     snap_status = 1;
@@ -3970,6 +4038,7 @@ void Record_MemcardLoad(int slot, int file_no)
 
             // copy buffer to savestate
             memcpy(rec_state, &loaded_recsave->savestate, sizeof(Savestate));
+            event_vars->savestate_saved_while_mirrored = false;
 
             // restore controller indices
             rec_state->ft_state[0].player_block.controller = stc_hmn_controller;
@@ -4008,6 +4077,7 @@ void Record_MemcardLoad(int slot, int file_no)
 
             // save to personal savestate
             event_vars->Savestate_Save(event_vars->savestate);
+            event_vars->savestate_saved_while_mirrored = LabOptions_Record[OPTREC_MIRRORED_PLAYBACK].option_val;
         }
 
         HSD_Free(memcard_save.data);
@@ -4041,13 +4111,10 @@ void Record_StartExport(GOBJ *menu_gobj)
 void Record_LoadSavestate() {
     event_vars->Savestate_Load(
         rec_state,
-        (
-            LabOptions_Record[OPTREC_MIRRORED_PLAYBACK].option_val &&
-            (LabOptions_Record[OPTREC_HMNMODE].option_val == RECMODE_HMN_PLAYBACK || LabOptions_Record[OPTREC_CPUMODE].option_val == RECMODE_CPU_PLAYBACK) &&
-            (LabOptions_Record[OPTREC_HMNMODE].option_val != RECMODE_HMN_RECORD && LabOptions_Record[OPTREC_CPUMODE].option_val != RECMODE_CPU_RECORD)
-        )
+        LabOptions_Record[OPTREC_MIRRORED_PLAYBACK].option_val
     );
-    playback_cancelled = false;
+    stc_playback_cancelled_hmn = false;
+    stc_playback_cancelled_cpu = false;
 }
 
 void Snap_CObjThink(GOBJ *gobj)
@@ -4096,6 +4163,7 @@ void Savestates_Update()
                     {
                         // save state
                         event_vars->Savestate_Save(event_vars->savestate);
+                        event_vars->savestate_saved_while_mirrored = LabOptions_Record[OPTREC_MIRRORED_PLAYBACK].option_val;
                         save_timer[port] = 0; // Reset timer after saving
                         lockout_timer = LOCKOUT_DURATION;
                     }
@@ -4109,15 +4177,13 @@ void Savestates_Update()
                 if ((pad->down & HSD_BUTTON_DPAD_LEFT) && !(pad->held & blacklist))
                 {
                     // load state
+                    int mirror = LabOptions_Record[OPTREC_MIRRORED_PLAYBACK].option_val;
                     event_vars->Savestate_Load(
                         event_vars->savestate,
-                        (
-                            LabOptions_Record[OPTREC_MIRRORED_PLAYBACK].option_val &&
-                            (LabOptions_Record[OPTREC_HMNMODE].option_val == RECMODE_HMN_PLAYBACK || LabOptions_Record[OPTREC_CPUMODE].option_val == RECMODE_CPU_PLAYBACK) &&
-                            (LabOptions_Record[OPTREC_HMNMODE].option_val != RECMODE_HMN_RECORD && LabOptions_Record[OPTREC_CPUMODE].option_val != RECMODE_CPU_RECORD)
-                        )
+                        !(mirror == event_vars->savestate_saved_while_mirrored)
                     );
-                    playback_cancelled = false;
+                    stc_playback_cancelled_hmn = false;
+                    stc_playback_cancelled_cpu = false;
 
                     // re-roll random slot
                     if (LabOptions_Record[OPTREC_HMNSLOT].option_val == 0)
@@ -5494,6 +5560,11 @@ void Event_Update()
 }
 
 void Event_Think_LabState_Normal(GOBJ *event) {
+    // Aitch: TODO - is there a good reason why we need both Record_Think and this function?
+    // There could be a priority issue, where we need to call Record_Think after the cpu inputs are decided for whatever reason.
+    // I think it makes sense to fold the two into a single function, if possible.
+    // Or, call Record_Think from this function rather than it being a callback.
+
     LabData *eventData = event->userdata;
     GOBJ *hmn = Fighter_GetGObj(0);
     FighterData *hmn_data = hmn->userdata;
@@ -5646,15 +5717,34 @@ void Event_Think_LabState_Normal(GOBJ *event) {
     {
         Fighter_SetSlotType(cpu_data->ply, 1);
         cpu_data->pad_index = stc_cpu_controller;
-
         CPUThink(event, hmn, cpu);
 
         break;
     }
     case (RECMODE_CPU_PLAYBACK):
     {
-        Fighter_SetSlotType(cpu_data->ply, 0);
-        cpu_data->pad_index = stc_cpu_controller;
+        int countering = stc_playback_cancelled_cpu;
+
+        switch (LabOptions_Record[OPTREC_PLAYBACK_COUNTER].option_val) {
+        case PLAYBACKCOUNTER_OFF:
+            break;
+        case PLAYBACKCOUNTER_ENDS:
+            stc_playback_cancelled_cpu |= Record_PastLastInput(1);
+            break;
+        case PLAYBACKCOUNTER_ON_HIT:
+            stc_playback_cancelled_cpu |= cpu_data->flags.hitlag;
+            break;
+        }
+
+        if (!stc_playback_cancelled_cpu) {
+            Fighter_SetSlotType(cpu_data->ply, 0);
+            cpu_data->pad_index = stc_cpu_controller;
+        } else {
+            Fighter_SetSlotType(cpu_data->ply, 1);
+            cpu_data->pad_index = stc_cpu_controller;
+            CPUThink(event, hmn, cpu);
+        }
+
         break;
     }
     case (RECMODE_CPU_CONTROL):
@@ -5682,10 +5772,10 @@ void Event_Think_LabState_Normal(GOBJ *event) {
                 HSD_BUTTON_DPAD_UP | HSD_TRIGGER_L | HSD_TRIGGER_R | HSD_TRIGGER_Z);
 
         if (hmn_mode == RECMODE_HMN_PLAYBACK && (buttons | triggers | sticks)) {
-            playback_cancelled = true;
+            stc_playback_cancelled_hmn = true;
         }
 
-        if (playback_cancelled || hmn_mode != RECMODE_HMN_PLAYBACK)
+        if (stc_playback_cancelled_hmn || hmn_mode != RECMODE_HMN_PLAYBACK)
             hmn_data->pad_index = stc_hmn_controller;
         else
             hmn_data->pad_index = stc_null_controller;
