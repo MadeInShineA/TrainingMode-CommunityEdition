@@ -1231,6 +1231,12 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
     // noact
     cpu_data->cpu.ai = 15;
 
+    if ((cpu_data->TM.state_prev[0] == ASID_CAPTURECUT && cpu_state != ASID_CAPTURECUT) || (cpu_data->TM.state_prev[0] == ASID_CAPTUREJUMP && cpu_state != ASID_CAPTUREJUMP))
+    {
+      cpu_state = CPUSTATE_COUNTER;
+      goto CPULOGIC_COUNTER;
+    }
+
     // if first throw frame, advance hitnum
     int is_thrown = CPU_IsThrown(cpu, hmn);
     if (is_thrown == 1 && eventData->cpu_isthrown == 0)
@@ -1982,6 +1988,7 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
     case (CPUSTATE_COUNTER):
     CPULOGIC_COUNTER:
     {
+        TMLOG("In COUNTER state");
         int actionable_this_frame = CPUAction_CheckASID(cpu, ASID_ACTIONABLE);
 
         // check if the CPU has been actionable yet
@@ -2039,6 +2046,31 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
             // get action to perform
             int shieldCtr = LabOptions_CPU[OPTCPU_CTRSHIELD].option_val;
             action_id = CPUCounterActionsShield[shieldCtr];
+        }
+
+        // Additional check for the grab release counter action
+        else if (cpu_data->TM.state_prev[0] == ASID_CAPTURECUT || cpu_data->TM.state_prev[0] == ASID_CAPTUREJUMP)
+        {
+
+            if (eventData->cpu_countertimer < LabOptions_CPU[OPTCPU_CTRFRAMES].option_val)
+            {
+                break;
+            }
+            
+            // This is needed to avoid the cpu going into COUNTER_STATE indefinitly when the counter action is set to NONE
+            cpu_data->TM.state_prev[0] = CPUSTATE_COUNTER;
+
+            if (cpu_data->phys.air_state == 0 || (eventData->cpu_groundstate == 0)) // if am grounded or started grounded
+            {
+                int grndCtr = LabOptions_CPU[OPTCPU_CTRGRND].option_val;
+                action_id = CPUCounterActionsGround[grndCtr];
+            }
+
+            else if (cpu_data->phys.air_state == 1) // only if in the air when the cpu_countertimer is up
+            {
+                int airCtr = LabOptions_CPU[OPTCPU_CTRAIR].option_val;
+                action_id = CPUCounterActionsAir[airCtr];
+            }
         }
         else
         {
