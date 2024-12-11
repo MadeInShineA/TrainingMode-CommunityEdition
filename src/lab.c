@@ -1988,7 +1988,6 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
     case (CPUSTATE_COUNTER):
     CPULOGIC_COUNTER:
     {
-        TMLOG("In COUNTER state");
         int actionable_this_frame = CPUAction_CheckASID(cpu, ASID_ACTIONABLE);
 
         // check if the CPU has been actionable yet
