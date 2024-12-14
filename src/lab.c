@@ -2131,7 +2131,6 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
     if (CPUAction_CheckASID(cpu, ASID_ACTIONABLE) || eventData->cpu_countering) {
         eventData->cpu_countertimer++;
     } else {
-        TMLOG("Test");
         eventData->cpu_countertimer = 0;
     }
 
