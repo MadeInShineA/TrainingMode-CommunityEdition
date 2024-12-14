@@ -1231,10 +1231,14 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
     // noact
     cpu_data->cpu.ai = 15;
 
-    if ((cpu_data->TM.state_prev[0] == ASID_CAPTURECUT && cpu_state != ASID_CAPTURECUT) || (cpu_data->TM.state_prev[0] == ASID_CAPTUREJUMP && cpu_state != ASID_CAPTUREJUMP))
+    int last_state = cpu_data->TM.state_prev[0];
+    bool is_cpu_no_longer_in_captur_cut = last_state == ASID_CAPTURECUT && cpu_state != ASID_CAPTURECUT;
+    bool is_cpu_no_longer_in_captur_jump = last_state == ASID_CAPTUREJUMP && cpu_state != ASID_CAPTUREJUMP;
+
+    if((is_cpu_no_longer_in_captur_cut || is_cpu_no_longer_in_captur_jump) && cpu_data->TM.state_frame == 1)
     {
-      cpu_state = CPUSTATE_COUNTER;
-      goto CPULOGIC_COUNTER;
+        eventData->cpu_state = CPUSTATE_COUNTER;
+        goto CPULOGIC_COUNTER;
     }
 
     // if first throw frame, advance hitnum
@@ -2056,10 +2060,7 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
                 break;
             }
             
-            // This is needed to avoid the cpu going into COUNTER_STATE indefinitly when the counter action is set to NONE
-            cpu_data->TM.state_prev[0] = CPUSTATE_COUNTER;
-
-            if (cpu_data->phys.air_state == 0 || (eventData->cpu_groundstate == 0)) // if am grounded or started grounded
+            if (cpu_data->phys.air_state == 0 || eventData->cpu_groundstate == 0) // if am grounded or started grounded
             {
                 int grndCtr = LabOptions_CPU[OPTCPU_CTRGRND].option_val;
                 action_id = CPUCounterActionsGround[grndCtr];
@@ -2130,6 +2131,7 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
     if (CPUAction_CheckASID(cpu, ASID_ACTIONABLE) || eventData->cpu_countering) {
         eventData->cpu_countertimer++;
     } else {
+        TMLOG("Test");
         eventData->cpu_countertimer = 0;
     }
 
