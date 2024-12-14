@@ -2052,7 +2052,7 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
         }
 
         // Additional check for the grab release counter action
-        else if (cpu_data->TM.state_prev[0] == ASID_CAPTURECUT || cpu_data->TM.state_prev[0] == ASID_CAPTUREJUMP)
+        else if (last_state == ASID_CAPTURECUT || last_state == ASID_CAPTUREJUMP)
         {
 
             if (eventData->cpu_countertimer < LabOptions_CPU[OPTCPU_CTRFRAMES].option_val)
