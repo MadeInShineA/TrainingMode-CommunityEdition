@@ -1383,9 +1383,9 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
             Fighter_ZeroCPUInputs(cpu_data);
             if (LabOptions_CPU[OPTCPU_GRABRELEASE].option_val == CPUGRABRELEASE_AIRBORN)    
             {
-                cpu_data->input.held = HSD_BUTTON_X;
+                cpu_data->cpu.held = HSD_BUTTON_X;
             }
-            ;
+            break;
         }
         case (CPUMASH_MED):
         {
