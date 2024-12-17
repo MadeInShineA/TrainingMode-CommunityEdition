@@ -1366,21 +1366,13 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
         {
             eventData->cpu_state = CPUSTATE_RECOVER;
             goto CPULOGIC_RECOVER;
-        }
-
-        if (LabOptions_CPU[OPTCPU_GRABRELEASE].option_val == CPUGRABRELEASE_AIRBORN)
-        {
-            cpu_data->cpu.held |= HSD_BUTTON_X;
-        }
+        } 
 
         switch (LabOptions_CPU[OPTCPU_MASH].option_val)
         {
         case (CPUMASH_NONE):
         {
-            // Fighter_ZeroCPUInputs(cpu_data);
-            cpu_data->input.lstick.X = 0;
-            cpu_data->input.lstick.Y = 0;
-
+            Fighter_ZeroCPUInputs(cpu_data);
             break;
         }
         case (CPUMASH_MED):
@@ -1393,7 +1385,7 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
                 cpu_data->input.lstick.Y = 0;
 
                 // input
-                cpu_data->cpu.held |= PAD_BUTTON_A;
+                cpu_data->cpu.held = PAD_BUTTON_A;
                 cpu_data->cpu.lstickX = 127;
             }
             break;
@@ -1408,7 +1400,7 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
                 cpu_data->input.lstick.Y = 0;
 
                 // input
-                cpu_data->cpu.held |= PAD_BUTTON_A;
+                cpu_data->cpu.held = PAD_BUTTON_A;
                 cpu_data->cpu.lstickX = 127;
             }
             break;
@@ -1421,10 +1413,15 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
             cpu_data->input.lstick.Y = 0;
 
             // input
-            cpu_data->cpu.held |= PAD_BUTTON_A;
+            cpu_data->cpu.held = PAD_BUTTON_A;
             cpu_data->cpu.lstickX = 127;
             break;
         }
+        }
+
+        if (LabOptions_CPU[OPTCPU_GRABRELEASE].option_val == CPUGRABRELEASE_AIRBORN)
+        {
+            cpu_data->cpu.held |= HSD_BUTTON_X;
         }
 
         break;
