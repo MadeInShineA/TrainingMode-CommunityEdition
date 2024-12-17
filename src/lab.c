@@ -1366,7 +1366,7 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
         {
             eventData->cpu_state = CPUSTATE_RECOVER;
             goto CPULOGIC_RECOVER;
-        } 
+        }
 
         switch (LabOptions_CPU[OPTCPU_MASH].option_val)
         {
