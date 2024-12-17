@@ -1368,23 +1368,19 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
             goto CPULOGIC_RECOVER;
         }
 
-        // The default held button is PAD_BUTTON_A
-        int input = PAD_BUTTON_A;
-
         if (LabOptions_CPU[OPTCPU_GRABRELEASE].option_val == CPUGRABRELEASE_AIRBORN)
         {
-            input =  HSD_BUTTON_X;
+            cpu_data->cpu.held |= HSD_BUTTON_X;
         }
 
         switch (LabOptions_CPU[OPTCPU_MASH].option_val)
         {
         case (CPUMASH_NONE):
         {
-            Fighter_ZeroCPUInputs(cpu_data);
-            if (LabOptions_CPU[OPTCPU_GRABRELEASE].option_val == CPUGRABRELEASE_AIRBORN)    
-            {
-                cpu_data->cpu.held = HSD_BUTTON_X;
-            }
+            // Fighter_ZeroCPUInputs(cpu_data);
+            cpu_data->input.lstick.X = 0;
+            cpu_data->input.lstick.Y = 0;
+
             break;
         }
         case (CPUMASH_MED):
@@ -1397,7 +1393,7 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
                 cpu_data->input.lstick.Y = 0;
 
                 // input
-                cpu_data->cpu.held = input;
+                cpu_data->cpu.held |= PAD_BUTTON_A;
                 cpu_data->cpu.lstickX = 127;
             }
             break;
@@ -1412,7 +1408,7 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
                 cpu_data->input.lstick.Y = 0;
 
                 // input
-                cpu_data->cpu.held = input;
+                cpu_data->cpu.held |= PAD_BUTTON_A;
                 cpu_data->cpu.lstickX = 127;
             }
             break;
@@ -1425,7 +1421,7 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
             cpu_data->input.lstick.Y = 0;
 
             // input
-            cpu_data->cpu.held = input;
+            cpu_data->cpu.held |= PAD_BUTTON_A;
             cpu_data->cpu.lstickX = 127;
             break;
         }
