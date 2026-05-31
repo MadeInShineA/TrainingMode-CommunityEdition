@@ -339,6 +339,41 @@ EventDesc Powershield = {
     .callbackPriority = 3,
     .matchData = &Powershield_MatchData,
 };
+
+static EventMatchData EscapeDThrowKnee_MatchData = {
+    .timer = MATCH_TIMER_HIDE,
+    .matchType = MATCH_MATCHTYPE_TIME,
+    .hideGo = true,
+    .hideReady = true,
+    .isCreateHUD = true,
+    .timerRunOnPause = false,
+    .isCheckForZRetry = true,
+    .isShowScore = false,
+    .isRunStockLogic = false,
+    .isDisableHit = false,
+    .useKOCounter = false,
+    .timerSeconds = 0,
+};
+EventDesc EscapeDThrowKnee = {
+    .eventName = "Escape DThrow Knee\n",
+    .eventDescription = "Airdodge out of Falcon's down\nthrow knee kill confirm!",
+    .eventFile = "dthrowknee",
+    .jumpTableIndex = -1,
+    .CSSType = SLCHRKIND_EVENT,
+    .allowed_characters = {
+        .hmn = CSSID_PEACH | CSSID_MARIO | CSSID_DOCTOR_MARIO | CSSID_LUIGI
+            | CSSID_MEWTWO | CSSID_ZELDA | CSSID_ICE_CLIMBERS | CSSID_MARTH,
+        .cpu = -1
+    },
+    .cpuKind = CKIND_FALCON,
+    .stage = GRKINDEXT_FD,
+    .disable_hazards = true,
+    .force_sopo = true,
+    .scoreType = SCORETYPE_KO,
+    .callbackPriority = 3,
+    .matchData = &EscapeDThrowKnee_MatchData,
+};
+
 EventDesc Ledgetech = {
     .eventName = "Ledgetech Training\n",
     .eventDescription = "Practice ledgeteching\nFalco's down-smash!",
@@ -672,6 +707,7 @@ static EventDesc *CharacterSpecific_Events[] = {
     &Edgeguard,
     &Sweetspot,
     &EscapeSheik,
+    &EscapeDThrowKnee,
     &FloatCancel,
 };
 static EventPage CharacterSpecific_Page = {
@@ -707,6 +743,7 @@ EventVars stc_event_vars = {
     .Tip_Destroy = Tip_Destroy,
     .GFX_Start = GFX_Start,
     .HUD_DrawRects = HUD_DrawRects,
+    .HUD_DrawTris = HUD_DrawTris,
     .HUD_DrawText = HUD_DrawText,
     .HUD_DrawActionLogBar = HUD_DrawActionLogBar,
     .HUD_DrawActionLogKey = HUD_DrawActionLogKey,
@@ -785,13 +822,32 @@ void GFX_Start(u16 vtx_count, GFX_Params params)
     GXBegin(params.shape, GX_VTXFMT0, vtx_count);
 }
 
+void HUD_DrawTris(Tri *tris, GXColor *colors, int count)
+{
+    HUDCamData *cam_data = stc_event_vars.hudcam_gobj->userdata;
+    if (cam_data->hide) return;
+
+    COBJ *prev_camera = COBJ_GetCurrent();
+    CObj_SetCurrent(stc_event_vars.hudcam_gobj->hsd_object);
+
+    GFX_Start(count * 3, (GFX_Params) { .shape = GX_TRIANGLES });
+    for (int i = 0; i < count; ++i) {
+        GXColor color = colors[i];
+        Tri *tri = &tris[i];
+        GFX_AddVtx((*tri)[0].X, (*tri)[0].Y, 0.f, color);
+        GFX_AddVtx((*tri)[1].X, (*tri)[1].Y, 0.f, color);
+        GFX_AddVtx((*tri)[2].X, (*tri)[2].Y, 0.f, color);
+    }
+
+    CObj_SetCurrent(prev_camera);
+}
+
 void HUD_DrawRects(Rect *rects, GXColor *colors, int count)
 {
     HUDCamData *cam_data = stc_event_vars.hudcam_gobj->userdata;
-    if (cam_data->hide)
-        return;
+    if (cam_data->hide) return;
 
-    COBJ *cur_cam = COBJ_GetCurrent();
+    COBJ *prev_camera = COBJ_GetCurrent();
     CObj_SetCurrent(stc_event_vars.hudcam_gobj->hsd_object);
 
     GFX_Start(count * 4, (GFX_Params) { .shape = GX_QUADS });
@@ -809,8 +865,8 @@ void HUD_DrawRects(Rect *rects, GXColor *colors, int count)
         GFX_AddVtx(x2, y2, 0.f, color);
         GFX_AddVtx(x2, y1, 0.f, color);
     }
-    
-    CObj_SetCurrent(cur_cam);
+
+    CObj_SetCurrent(prev_camera);
 }
 
 void HUD_DrawText(const char *text, Rect *pos, float size)
@@ -868,7 +924,7 @@ static float action_key_size_decrement = 1.2f;
 static float action_key_y_pos = 15.f;
 static float action_key_height = 6.f;
 
-void HUD_DrawActionLogBar(u8 *action_log, GXColor *color_lookup, int log_count) {
+Rect HUD_DrawActionLogBar(u8 *action_log, GXColor *color_lookup, int log_count) {
     Rect rects[log_count + 1];
     GXColor colors[log_count + 1];
     
@@ -878,16 +934,20 @@ void HUD_DrawActionLogBar(u8 *action_log, GXColor *color_lookup, int log_count) 
     Rect background = { -w/2.f, log_y_pos, w, log_size + log_padding*2.f }; 
     rects[0] = background;
     colors[0] = log_background_color;
-    
+
     RectShrink(&background, log_padding);
+    Rect ret = background;
+    
     for (int i = 0; i < log_count; ++i) {
         RectSplitL(&rects[i+1], &background, log_size, log_padding);
         colors[i+1] = color_lookup[action_log[i]];
     }
 
     HUD_DrawRects(rects, colors, log_count + 1);
+
+    return ret;
 }
-    
+
 void HUD_DrawActionLogKey(char **action_names, GXColor *action_colors, int action_count) {
     Rect rects[action_count*2];
     GXColor colors[action_count*2];
