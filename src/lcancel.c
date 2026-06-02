@@ -1,5 +1,11 @@
 #include "lcancel.h"
 
+static char *panel_labels[3] = { "Timing", "Fastfall", "Success Rate" };
+static char timing_text[24] = "-";
+static char fastfall_text[24] = "-";
+static char success_rate_text[24] = "-";
+static char *panel_info[3] = {timing_text, fastfall_text, success_rate_text};
+
 // Main Menu
 enum lcancel_option
 {
@@ -73,6 +79,11 @@ static EventMenu LabMenu_Main = {
     .options = LcOptions_Main,
 };
 
+void LCancel_GX(GOBJ *gobj, int pass) {
+    if (pass != 2) return;
+    event_vars->HUD_DrawInfoPanel((const char**)panel_labels, (const char**)panel_info, countof(panel_labels));
+}
+
 // Init Function
 void Event_Init(GOBJ *gobj)
 {
@@ -87,9 +98,9 @@ void Event_Init(GOBJ *gobj)
     // initialize barrel intangible timer
     event_data->barrel_intangible_timer = 0;
 
-    // set CPU AI to no_act 15
-    //cpu_data->cpu.ai = 0;
+    GObj_AddGXLink(gobj, LCancel_GX, GXLINK_HUD, 80);
 }
+
 // Think Function
 void Event_Think(GOBJ *event)
 {
@@ -126,42 +137,7 @@ void LCancel_Init(LCancelData *event_data)
     GObj_AddObject(hud_gobj, 3, hud_jobj);
     GObj_AddGXLink(hud_gobj, GXLink_Common, GXLINK_HUD, 80);
 
-    // create text canvas
-    int canvas = Text_CreateCanvas(2, hud_gobj, 14, 15, 0, GXLINK_HUD, 81, 19);
-    event_data->hud.canvas = canvas;
-
-    // init text
-    Text **text_arr = &event_data->hud.text_time;
-    for (int i = 0; i < 3; i++)
-    {
-
-        // Create text object
-        Text *hud_text = Text_CreateText(2, canvas);
-        text_arr[i] = hud_text;
-        hud_text->kerning = 1;
-        hud_text->align = 1;
-        hud_text->use_aspect = 1;
-
-        // Get position
-        Vec3 text_pos;
-        JOBJ *text_jobj;
-        JOBJ_GetChild(hud_jobj, &text_jobj, 2 + i, -1);
-        JOBJ_GetWorldPosition(text_jobj, 0, &text_pos);
-
-        // adjust scale
-        Vec3 *scale = &hud_jobj->scale;
-        // text scale
-        hud_text->viewport_scale.X = (scale->X * 0.01) * LCLTEXT_SCALE;
-        hud_text->viewport_scale.Y = (scale->Y * 0.01) * LCLTEXT_SCALE;
-        hud_text->aspect.X = 165;
-
-        // text position
-        hud_text->trans.X = text_pos.X + (scale->X / 4.0);
-        hud_text->trans.Y = (text_pos.Y * -1) + (scale->Y / 4.0);
-
-        // dummy text
-        Text_AddSubtext(hud_text, 0, 0, "-");
-    }
+    JOBJ_SetFlagsAll(hud_jobj->child, JOBJ_HIDDEN);
 
     // save initial arrow position
     JOBJ *arrow_jobj;
@@ -247,18 +223,18 @@ void LCancel_Think(LCancelData *event_data, FighterData *hmn_data)
         // update timing text
         if (is_edge_cancel)
         {
-            Text_SetText(event_data->hud.text_time, 0, "EC %df", hmn_data->TM.state_prev_frames[0]);
+            sprintf(timing_text, "EC %df", hmn_data->TM.state_prev_frames[0]);
         }
         else if (event_data->current_l_input_timing > MAX_L_PRESS_TIMING)
         {
-            Text_SetText(event_data->hud.text_time, 0, "No Press");
+            sprintf(timing_text, "No Press");
         }
         else
         {
-            Text_SetText(event_data->hud.text_time, 0, "%df/7f", event_data->current_l_input_timing + 1);
+            sprintf(timing_text, "%df/7f", event_data->current_l_input_timing + 1);
         }
         int frame_box_id = min(event_data->current_l_input_timing, MAX_L_PRESS_TIMING);
-
+        
         // update arrow
         JOBJ *arrow_jobj;
         JOBJ_GetChild(hud_jobj, &arrow_jobj, LCLARROW_JOBJ, -1);
@@ -271,8 +247,8 @@ void LCancel_Think(LCancelData *event_data, FighterData *hmn_data)
 
         // Print succession
         int successful = event_data->hud.lcl_success;
-        float succession = ((float)event_data->hud.lcl_success / (float)event_data->hud.lcl_total) * 100.0;
-        Text_SetText(event_data->hud.text_scs, 0, "%d (%.2f%)", successful, succession);
+        float success_rate = (float)event_data->hud.lcl_success * 100.f / (float)event_data->hud.lcl_total;
+        sprintf(success_rate_text, "%d (%.2f%%)", successful, success_rate);
 
         // Play HUD anim
         JOBJ_RemoveAnimAll(hud_jobj);
@@ -287,14 +263,9 @@ void LCancel_Think(LCancelData *event_data, FighterData *hmn_data)
     if (IsAutoCancelLanding(hmn_data))
     {
         // state as autocancelled
-        Text_SetText(event_data->hud.text_time, 0, "Auto-canceled");
+        sprintf(fastfall_text, "Auto-canceled");
 
         should_update_fastfall_hud = true;
-
-        // Play HUD anim
-        JOBJ_RemoveAnimAll(hud_jobj);
-        JOBJ_AddAnimAll(hud_jobj, 0, event_data->lcancel_assets->hudmatanim[2], 0);
-        JOBJ_ReqAnimAll(hud_jobj, 0);
     }
 
     // update arrow animation
@@ -317,9 +288,9 @@ void LCancel_Think(LCancelData *event_data, FighterData *hmn_data)
     if (should_update_fastfall_hud) {
         // Print airborne frames
         if (event_data->is_fastfall)
-            Text_SetText(event_data->hud.text_air, 0, "%df", event_data->fastfall_frame - 1);
+            sprintf(fastfall_text, "%df", event_data->fastfall_frame - 1);
         else
-            Text_SetText(event_data->hud.text_air, 0, "-");
+            sprintf(fastfall_text, "-");
     }
 
     if (!can_fastfall && !IsAerialLandingState(state)) // cant fastfall, reset frames

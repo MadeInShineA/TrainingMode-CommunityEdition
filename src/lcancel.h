@@ -21,10 +21,6 @@ struct LCancelData
         GOBJ *gobj;
         u16 lcl_success;
         u16 lcl_total;
-        Text *text_time;
-        Text *text_air;
-        Text *text_scs;
-        int canvas;
         float arrow_base_x; // starting X position of arrow
         float arrow_prevpos;
         float arrow_nextpos;
