@@ -965,8 +965,8 @@ void HUD_DrawInfoPanel(const char **label, const char **info, int count) {
     COBJ *prev_camera = COBJ_GetCurrent();
     CObj_SetCurrent(stc_event_vars.hudcam_gobj->hsd_object);
 
-    float x = 17.f;
-    float y = 10.f;
+    float x = 18.f;
+    float y = 9.f;
     GXColor grey = { 130, 130, 130, 180 };
     GXColor black = { 0, 0, 0, 180 };
 
