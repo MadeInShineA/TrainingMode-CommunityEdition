@@ -2,6 +2,13 @@
 #include "events.h"
 #include "osds.h"
 
+static GXColor stc_msg_colors[] = {
+    {255, 255, 255, 255},
+    {141, 255, 110, 255},
+    {255, 162, 186, 255},
+    {255, 240, 0, 255},
+};
+
 static void UpdateIASATracking(GOBJ *ft) {
     FighterData *ft_data = ft->userdata;
     if (ft_data->flags.past_iasa)
@@ -30,19 +37,19 @@ static void RunOSD_FrameAdvantage(GOBJ *ft, GOBJ *ft_sub) {
             the advantage is the # frames until shieldstun is gone.
         If the attacker is actionable and the defender is also actionable,
             the advantages is -frames since shieldstun.
-    
+
     We use the 0 state to wait for GuardSetOff to start.
     We use the -1 state to wait for GuardSetOff to end.
     */
 
     FighterData *ft_data = ft->userdata;
     FighterData *ft_def_data = ft_data->TM.fighter_hurt_shield;
-    if (ft_def_data == 0) return; 
+    if (ft_def_data == 0) return;
     GOBJ *ft_def = ft_def_data->fighter;
 
     int ply = ft_data->ply;
     static int atk_hit_state[6] = {0};
-    
+
     // Wait for GuardSetOff to end before running frame advantage code again
     if (atk_hit_state[ply] == -1) {
         if (ft_def_data->state_id != ASID_GUARDSETOFF)
@@ -58,7 +65,7 @@ static void RunOSD_FrameAdvantage(GOBJ *ft, GOBJ *ft_sub) {
     }
 
     int atk_state = ft_data->state_id;
-    
+
     // "actionable" if either state changed or in iasa, and not in aerial or ac landing lag.
     bool atk_actionable = (atk_hit_state[ply] != atk_state || CheckIASA(ft_data))
         && (atk_state != ASID_LANDING || ft_data->state.frame >= ft_data->attr.normal_landing_lag)
@@ -66,7 +73,7 @@ static void RunOSD_FrameAdvantage(GOBJ *ft, GOBJ *ft_sub) {
 
     if (atk_actionable) {
         int advantage;
-    
+
         if (ft_def_data->state_id == ASID_GUARDSETOFF) {
             // + on shield: advantage is frames until shieldstun is gone.
             float anim_speed = ft_def_data->state.rate;
@@ -95,6 +102,99 @@ static void RunOSD_FrameAdvantage(GOBJ *ft, GOBJ *ft_sub) {
     }
 }
 
+typedef struct {
+    int osd_start_frame;
+    int first_grab_hitbox_frame;
+    int enemy_release_frame;
+    int thrower_prev_state;
+} HandoffState;
+
+static bool IsThrowState(const int state_id) {
+    return state_id >= ASID_THROWF && state_id <= ASID_THROWLW;
+}
+static bool IsThrownState(const int state_id) {
+    return (state_id >= ASID_THROWNF && state_id <= ASID_THROWNLWWOMEN) || (
+               state_id >= ASID_THROWNFF && state_id <= ASID_THROWNFLW);
+}
+
+static bool IsGrabHitboxActive(const FighterData *ft_data) {
+    if (ft_data->state_id == ASID_CATCH || ft_data->state_id == ASID_CATCHDASH) {
+        for (int i = 0; i < 4; i++) {
+            if (ft_data->hitbox[i].active) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static void RunOsd_Handoff(GOBJ *thrower, GOBJ *grabber, GOBJ *enemy, HandoffState *state) {
+    if (!thrower || !grabber || !enemy) return;
+    const FighterData *thrower_data = thrower->userdata;
+    if (thrower_data->kind != FTKIND_POPO && thrower_data->kind != FTKIND_NANA) return;
+    const FighterData *grabber_data = grabber->userdata;
+    const FighterData *enemy_data = enemy->userdata;
+
+    //time after the intiial throw this OSD times out
+    const int timeout = 60;
+
+    //tick if the thrower has started a throw recently (and not in the future for replay situations).
+    const bool should_tick_handoff = state->osd_start_frame != 0 &&
+                                         stc_match->time_frames - state->osd_start_frame < timeout &&
+                                         state->osd_start_frame <= stc_match->time_frames;
+    if (should_tick_handoff) {
+        //this number of frames after the enemy is released from the throw, the handoff is considered invalid,
+        //even if you successfully regrab. a successful regrab after this timeout is likely a chain grab or backtrack.
+        const int post_release_Timeout = 15;
+        if (state->enemy_release_frame == 0 && IsThrownState(enemy_data->TM.state_prev[0]) && !IsThrownState(enemy_data->state_id)) {
+            state->enemy_release_frame = stc_match->time_frames;
+        }
+
+        //grab hitbox is only two frames. first condition is to avoid false reporting the nana synced grab as a handoff attempt.
+        if (stc_match->time_frames - state->osd_start_frame > 8 && IsGrabHitboxActive(grabber_data) && stc_match->time_frames - state->first_grab_hitbox_frame != 1) {
+            state->first_grab_hitbox_frame = stc_match->time_frames;
+        }
+
+        if (grabber_data->state_id == ASID_CATCHPULL || grabber_data->state_id == ASID_CATCHDASHPULL) {
+            //if you grabbed them without setting these vars it means you grabbed them on the exact frame of release
+            state->enemy_release_frame = state->enemy_release_frame == 0 ? stc_match->time_frames : state->enemy_release_frame;
+            state->first_grab_hitbox_frame = state->first_grab_hitbox_frame == 0 ? stc_match->time_frames : state->first_grab_hitbox_frame;
+            int grab_to_throw_delta = state->first_grab_hitbox_frame - state->enemy_release_frame;
+            bool grab_early = grab_to_throw_delta < 1;
+            int color_timing = grab_to_throw_delta == -1 || grab_to_throw_delta == 0 ? MSGCOLOR_GREEN : MSGCOLOR_WHITE;
+            GOBJ *msg_gobj = Message_Display(OSD_FighterSpecificTech, thrower_data->ply, MSGCOLOR_WHITE,
+                                             "Handoff Success\n %dF %s", abs(grab_to_throw_delta),
+                                             grab_early ? "early" : "late");
+
+            MsgData *msg = msg_gobj->userdata;
+            Text_SetColor(msg->text, 0, &stc_msg_colors[MSGCOLOR_GREEN]);
+            Text_SetColor(msg->text, 1, &stc_msg_colors[color_timing]);
+            state->osd_start_frame = 0;
+        }
+        else if (state->enemy_release_frame != 0 && state->first_grab_hitbox_frame != 0 && stc_match->time_frames - state->enemy_release_frame > post_release_Timeout) {
+            int grab_to_throw_delta = state->first_grab_hitbox_frame - state->enemy_release_frame;
+            bool grab_early = grab_to_throw_delta < 1;
+            //if the timing was 'perfect', yet you missed, give a custom error message to avoid confusion.
+            //'Handoff failed, timing perfect' was confusing to people in testing.
+            if (grab_to_throw_delta == -1 || grab_to_throw_delta == 0) {
+                Message_Display(OSD_FighterSpecificTech, thrower_data->ply, MSGCOLOR_RED, "Handoff Failure\nConditions not Met");
+            }
+            else {
+                Message_Display(OSD_FighterSpecificTech, thrower_data->ply, MSGCOLOR_RED, "Handoff Failure\n %dF %s",
+                                abs(grab_to_throw_delta), grab_early ? "early" : "late");
+            }
+            state->osd_start_frame = 0;
+        }
+    } else if (!IsThrowState(state->thrower_prev_state) && IsThrowState(thrower_data->state_id)) {
+        state->osd_start_frame = stc_match->time_frames;
+    } else {
+        state->osd_start_frame = 0;
+        state->enemy_release_frame = 0;
+        state->first_grab_hitbox_frame = 0;
+    }
+    state->thrower_prev_state = thrower_data->state_id;
+}
+
 void OSD_Think(GOBJ *event) {
     u32 osd_enabled = stc_memcard->TM_OSDEnabled;
 
@@ -104,10 +204,21 @@ void OSD_Think(GOBJ *event) {
 
         // subchar is usually null except for nana and the inactive sheik/zelda tform
         GOBJ *ft_sub = Fighter_GetSubcharGObj(ply, 1);
-        
+
         if (ft) UpdateIASATracking(ft);
         if (ft_sub) UpdateIASATracking(ft_sub);
 
+
         if (osd_enabled & (1u << OSD_FrameAdvantage)) RunOSD_FrameAdvantage(ft, ft_sub);
+        if (osd_enabled & (1u << OSD_FighterSpecificTech)) {
+            // ICE CLIMBERS OSDS
+            static HandoffState handoff_states[6][2];
+            for (int enm = 0; enm < 6; ++enm) {
+                if (enm == ply) continue;
+                GOBJ *enm_ft = Fighter_GetSubcharGObj(enm, 0);
+                RunOsd_Handoff(ft, ft_sub, enm_ft, &handoff_states[ply][0]);
+                RunOsd_Handoff(ft_sub, ft, enm_ft, &handoff_states[ply][1]);
+            }
+        }
     }
 }
