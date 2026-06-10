@@ -58,7 +58,6 @@ static const int LOCKOUT_DURATION = 30;
 // then perform a counter action after that window.
 // This timer counts down those n frames.
 static int stc_powershield_timer = -1;
-static const int stc_powershield_window = 4;
 
 static float cpu_locked_percent = 0;
 static float hmn_locked_percent = 0;
@@ -2058,7 +2057,7 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
             }
 
             if (shield)
-                stc_powershield_timer = stc_powershield_window;
+                stc_powershield_timer = 1;
 
             if (stc_powershield_timer > 0) {
                 stc_powershield_timer--;
