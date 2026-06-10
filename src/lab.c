@@ -1476,6 +1476,12 @@ int Lab_CPUPerformAction(GOBJ *cpu, int action_id, GOBJ *hmn)
         cpu_data->cpu.cstickY = (s8)((float)inputs->substickY * 1.5875f);
         cpu_data->cpu.ltrigger = (u8)((float)inputs->trigger / 140.f * 255.f);
         cpu_data->cpu.held = Record_RearrangeButtons(inputs);
+
+        // If countering from shield, stub in a f1 shield input for convenience.
+        // This allows you to record from a non-shielding position / without stubbing in 1f of shield yourself.
+        if (eventData->cpu_hitkind == HITKIND_SHIELD && frame == 0)
+            cpu_data->cpu.held |= PAD_TRIGGER_R;
+
         eventData->counter_slot_frame = frame + 1;
         return false;
     }
