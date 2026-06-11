@@ -2067,9 +2067,11 @@ void CPUThink(GOBJ *event, GOBJ *hmn, GOBJ *cpu)
 
             if (stc_powershield_timer > 0) {
                 stc_powershield_timer--;
-                cpu_data->cpu.held |= PAD_TRIGGER_R;
-                cpu_data->flags.reflect_enable = 1;
-                cpu_data->reflect_bubble.size_mult = cpu_data->shield_bubble.size_mult;
+                if (!eventData->cpu_countering) {
+                    cpu_data->cpu.held |= PAD_TRIGGER_R;
+                    cpu_data->flags.reflect_enable = 1;
+                    cpu_data->reflect_bubble.size_mult = cpu_data->shield_bubble.size_mult;
+                }
             } else if (stc_powershield_timer == 0) {
                 stc_powershield_timer = -1;
                 eventData->cpu_hitnum++;
