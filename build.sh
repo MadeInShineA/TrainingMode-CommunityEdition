@@ -35,6 +35,7 @@ else
     gc_fst="bin/gc_fst"
     hgecko="bin/hgecko"
     hmex="bin/hmex"
+    xdelta="xdelta3"
 fi
 
 # check if en or jp and use appropriate patch
